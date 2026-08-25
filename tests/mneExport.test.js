@@ -41,12 +41,19 @@ test('events export contains one row per research event', () => {
 });
 
 test('metadata describes Muse EEG for MNE reconstruction', () => {
-  const out = buildMneReadyFiles(fixture());
-  const meta = JSON.parse(out.metadataJson);
+  const meta = JSON.parse(buildMneReadyFiles(fixture()).metadataJson);
   assert.equal(meta.format, 'ANR Muse EEG MNE-ready');
+  assert.equal(meta.format_version, '1.1');
   assert.equal(meta.sampling_frequency_hz, 256);
   assert.deepEqual(meta.channel_names, ['TP9','AF7','AF8','TP10']);
   assert.equal(meta.units, 'microvolts');
   assert.equal(meta.mne_time_source, 'sample_index / sampling_frequency_hz');
   assert.equal(meta.n_samples, 3);
+});
+
+test('metadata distinguishes wall-clock and sampled EEG durations', () => {
+  const meta = JSON.parse(buildMneReadyFiles(fixture()).metadataJson);
+  assert.equal(meta.recording_duration_seconds, 2);
+  assert.equal(meta.wall_clock_duration_seconds, 2);
+  assert.equal(meta.eeg_duration_seconds, 3 / 256);
 });

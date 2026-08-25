@@ -1,68 +1,88 @@
-# ANR MNE-Ready EEG Export Format
+# ANR Muse EEG Recorder — MNE-Ready Export Format
 
-Version: 1.0
+The ANR Muse EEG Recorder exports a session package designed for deterministic reconstruction in MNE-Python.
 
-The ANR Muse EEG Recorder uses a transparent browser-native export that can be reconstructed reliably in MNE-Python.
+## Package
 
-## Why the browser does not write FIF directly
-
-MNE FIF is a structured neurophysiology format written by MNE-Python. The ANR recorder is a static JavaScript/Web Bluetooth application, so the recorder exports an explicit MNE-ready package and the ANR EEG Analysis Pipeline creates the true MNE object/FIF file.
-
-## Sampling
-
-Muse EEG sampling frequency:
+A completed recording is distributed as:
 
 ```text
-256 Hz
+ANR_<session>_<timestamp>_MNE_READY.zip
+├── <prefix>_raw_eeg.csv
+├── <prefix>_events.tsv
+├── <prefix>_eeg_metadata.json
+└── README.txt
 ```
 
-Deterministic analysis time:
+## Raw EEG CSV
+
+The EEG table contains:
 
 ```text
-time_s = sample_index / 256
+sample_index
+time_s
+timestamp_ms
+iso_time
+session_code
+protocol
+stop_reason
+TP9_uV
+AF7_uV
+AF8_uV
+TP10_uV
+event_marker
 ```
 
-Browser/device timestamps are retained as provenance fields, but deterministic sample timing is the preferred MNE reconstruction source.
+For MNE reconstruction, the authoritative sample time is:
 
-## Channels
-
-| CSV column | MNE channel | Type | Input unit |
-|---|---|---|---|
-| TP9_uV | TP9 | EEG | µV |
-| AF7_uV | AF7 | EEG | µV |
-| AF8_uV | AF8 | EEG | µV |
-| TP10_uV | TP10 | EEG | µV |
-
-MNE stores EEG internally in volts, therefore conversion is:
-
-```python
-data_v = data_uv * 1e-6
+```text
+time_s = sample_index / sampling_frequency_hz
 ```
 
-## MNE reconstruction example
+For Muse 2 recordings in the current ANR recorder:
 
-```python
-import mne
-import pandas as pd
-
-FS = 256.0
-CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
-CSV_COLUMNS = ["TP9_uV", "AF7_uV", "AF8_uV", "TP10_uV"]
-
-df = pd.read_csv("raw_eeg.csv")
-data_v = df[CSV_COLUMNS].to_numpy(float).T * 1e-6
-
-info = mne.create_info(CHANNELS, sfreq=FS, ch_types="eeg")
-raw = mne.io.RawArray(data_v, info)
-
-events = pd.read_csv("events.tsv", sep="\t")
-annotations = mne.Annotations(
-    onset=events["onset"].to_numpy(float),
-    duration=events["duration"].to_numpy(float),
-    description=events["description"].astype(str).tolist(),
-)
-raw.set_annotations(annotations)
-raw.save("ANR_session_raw.fif", overwrite=True)
+```text
+sampling_frequency_hz = 256
 ```
 
-The ANR EEG Analysis Pipeline automates these steps.
+Browser timestamps are preserved as acquisition metadata, but they are not the primary MNE timing source.
+
+## Events TSV
+
+The event table uses one row per event:
+
+```text
+onset    duration    description    source
+```
+
+`onset` and `duration` are in seconds. ANR manual and automatic markers are preserved in `description`.
+
+## Metadata JSON
+
+The metadata declares the recording format, sampling frequency, channel names/types, input units, device, session information, file names, event count, and timing rule.
+
+### Duration fields
+
+From format version 1.1 onward the metadata distinguishes:
+
+- `wall_clock_duration_seconds` — elapsed researcher/browser start-to-stop time.
+- `eeg_duration_seconds` — synchronized sampled duration, calculated as `n_samples / sampling_frequency_hz`.
+- `recording_duration_seconds` — retained for backward compatibility and currently mirrors wall-clock duration.
+
+This prevents acquisition-control time from being confused with the actual sampled EEG duration.
+
+## MNE conversion
+
+The ANR EEG Analysis Pipeline:
+
+1. reads the metadata;
+2. validates `sample_index` and `time_s`;
+3. reads TP9, AF7, AF8 and TP10 in microvolts;
+4. converts microvolts to volts;
+5. creates an MNE `RawArray`;
+6. reads `events.tsv` as MNE annotations;
+7. preserves technical source metadata in `raw.info["description"]`.
+
+## Research-use statement
+
+This is a research acquisition/export format. It is not a clinical EEG standard, diagnostic interpretation, or medical device output.

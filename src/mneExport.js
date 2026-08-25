@@ -86,13 +86,14 @@ export function buildMneReadyFiles({
     ].join('\t'));
   }
 
-  const durationSeconds = Number.isFinite(startedAt) && Number.isFinite(stoppedAt)
+  const wallClockDurationSeconds = Number.isFinite(startedAt) && Number.isFinite(stoppedAt)
     ? Math.max(0, (stoppedAt - startedAt) / 1000)
     : n / fs;
+  const eegDurationSeconds = n / fs;
 
   const metadata = {
     format: 'ANR Muse EEG MNE-ready',
-    format_version: '1.0',
+    format_version: '1.1',
     sampling_frequency_hz: fs,
     mne_time_source: 'sample_index / sampling_frequency_hz',
     channel_names: CHANNELS,
@@ -106,13 +107,16 @@ export function buildMneReadyFiles({
     stop_reason: stopReason || null,
     recording_start_utc: Number.isFinite(startedAt) ? new Date(startedAt).toISOString() : null,
     recording_stop_utc: Number.isFinite(stoppedAt) ? new Date(stoppedAt).toISOString() : null,
-    recording_duration_seconds: durationSeconds,
+    // Kept for backward compatibility with v1.0 metadata.
+    recording_duration_seconds: wallClockDurationSeconds,
+    wall_clock_duration_seconds: wallClockDurationSeconds,
+    eeg_duration_seconds: eegDurationSeconds,
     n_samples: n,
     n_events: events.length,
     eeg_file: 'raw_eeg.csv',
     events_file: 'events.tsv',
     research_use_only: true,
-    mne_reconstruction_note: 'Convert microvolts to volts, create MNE RawArray at 256 Hz, and load events.tsv as annotations.',
+    mne_reconstruction_note: `Convert microvolts to volts, create MNE RawArray at ${fs} Hz, and load events.tsv as annotations.`, 
   };
 
   return {

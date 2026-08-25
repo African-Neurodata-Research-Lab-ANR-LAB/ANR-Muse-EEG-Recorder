@@ -1,5 +1,7 @@
 import './styles.css';
 import { MuseClient } from 'muse-js';
+import JSZip from 'jszip';
+import { buildMneReadyFiles } from './mneExport.js';
 
 const FS = 256;
 const CHANNELS = ['TP9','AF7','AF8','TP10'];
@@ -11,7 +13,7 @@ const state = {
   display:[[],[],[],[]], filters:[], recording:false, startedAt:null,
   stoppedAt:null, timer:null, selectedDuration:0,
   recorded:[{values:[],times:[]},{values:[],times:[]},{values:[],times:[]},{values:[],times:[]}],
-  events:[], lastRawCsv:null, lastRawName:null,
+  events:[], lastRawCsv:null, lastRawName:null, lastPackageBlob:null, lastPackageName:null,
   autoMarker:{
     enabled:false,
     name:'',
@@ -52,7 +54,7 @@ document.querySelector('#app').innerHTML = `
         </article>
       </div>
       <article class="panel research-only"><strong>Research use only.</strong> This recorder captures and exports Muse EEG for research. It is not a clinical EEG system or medical diagnostic tool.</article>
-      <article class="panel"><div class="eyebrow">WORKFLOW</div><h3>Connect → record → raw CSV</h3><div class="auto-flow"><b>Connect Muse</b><span>→</span><b>Start recording</b><span>→</span><b>Stop / auto-stop</b><span>→</span><b>Raw EEG CSV downloads automatically</b></div></article>
+      <article class="panel"><div class="eyebrow">WORKFLOW</div><h3>Connect → record → MNE-ready package</h3><div class="auto-flow"><b>Connect Muse</b><span>→</span><b>Start recording</b><span>→</span><b>Stop / auto-stop</b><span>→</span><b>MNE-ready ZIP downloads automatically</b></div></article>
     </section>
 
     <section class="view" id="record">
@@ -99,10 +101,10 @@ document.querySelector('#app').innerHTML = `
           <div id="eventList" class="timeline" style="margin-top:12px"><p class="download-status">No events marked.</p></div>
         </article>
       </div>
-      <article id="downloadStatus" class="panel download-card"><strong>No completed recording yet.</strong><div class="download-status">When recording stops, the raw EEG CSV will be generated and downloaded automatically.</div><div class="actions" style="margin-top:10px"><button id="downloadRaw">Download last raw CSV again</button></div></article>
+      <article id="downloadStatus" class="panel download-card"><strong>No completed recording yet.</strong><div class="download-status">When recording stops, an MNE-ready ZIP containing raw EEG, events, and metadata will be generated and downloaded automatically.</div><div class="actions" style="margin-top:10px"><button id="downloadPackage">Download last MNE-ready ZIP again</button><button id="downloadRaw">Download raw CSV again</button></div></article>
     </section>
   </main>
-  <footer class="footer"><strong>African NeuroData Research Lab (ANR)</strong> • Muse EEG Recorder v1.1 • Research use only • <a href="https://africanneurodataresearch.org/" target="_blank" rel="noreferrer">africanneurodataresearch.org</a> • <a href="mailto:anrlab.ng@gmail.com">anrlab.ng@gmail.com</a></footer>
+  <footer class="footer"><strong>African NeuroData Research Lab (ANR)</strong> • Muse EEG Recorder v1.3 • Research use only • <a href="https://africanneurodataresearch.org/" target="_blank" rel="noreferrer">africanneurodataresearch.org</a> • <a href="mailto:anrlab.ng@gmail.com">anrlab.ng@gmail.com</a></footer>
 </div>`;
 
 const eegCanvas = $('eegCanvas');
@@ -227,7 +229,7 @@ function addEvent(label,source='manual'){
 
 function startRecording(){
   if(!state.connected){$('connectMsg').textContent='Connect Muse before recording.';showView('setup');return}if(state.recording)return;
-  state.recorded=[{values:[],times:[]},{values:[],times:[]},{values:[],times:[]},{values:[],times:[]}];state.events=[];state.startedAt=Date.now();state.stoppedAt=null;state.recording=true;state.selectedDuration=Number($('duration').value)||0;state.lastRawCsv=null;state.lastRawName=null;
+  state.recorded=[{values:[],times:[]},{values:[],times:[]},{values:[],times:[]},{values:[],times:[]}];state.events=[];state.startedAt=Date.now();state.stoppedAt=null;state.recording=true;state.selectedDuration=Number($('duration').value)||0;state.lastRawCsv=null;state.lastRawName=null;state.lastPackageBlob=null;state.lastPackageName=null;
   $('recordPill').textContent='● RECORDING';$('recordPill').className='pill warn';$('recordState').textContent='● RECORDING — RAW DATA IS BEING SAVED';$('recordState').className='record-state active';renderEvents();updateUI();
   if(state.autoMarker.enabled){
     const cfg=readAutoMarkerConfig();
@@ -241,8 +243,26 @@ function startRecording(){
   if(state.selectedDuration>0){clearTimeout(state.timer);state.timer=setTimeout(()=>finishRecording('duration completed'),state.selectedDuration*1000)}
 }
 function stopRecording(){finishRecording('stopped by researcher')}
-function finishRecording(reason){
-  if(!state.recording)return;state.recording=false;state.stoppedAt=Date.now();clearTimeout(state.timer);state.timer=null;stopAutoMarkerSchedule(true);$('recordPill').textContent='Recording saved';$('recordPill').className='pill good';$('recordState').textContent='RECORDING COMPLETE — RAW CSV READY';$('recordState').className='record-state idle';const file=buildRawExport(reason);downloadText(file.name,file.csv,'text/csv');$('downloadStatus').innerHTML=`<strong>Raw EEG recording saved.</strong><div class="download-status">${file.name}<br/>${file.rows.toLocaleString()} synchronized EEG rows • ${((state.stoppedAt-state.startedAt)/1000).toFixed(1)} s</div><div class="actions" style="margin-top:10px"><button id="downloadRawAgain">Download raw CSV again</button></div>`;$('downloadRawAgain').addEventListener('click',downloadRaw);updateUI();
+async function finishRecording(reason){
+  if(!state.recording)return;
+  state.recording=false;state.stoppedAt=Date.now();clearTimeout(state.timer);state.timer=null;stopAutoMarkerSchedule(true);
+  $('recordPill').textContent='Packaging recording…';$('recordPill').className='pill warn';
+  $('recordState').textContent='RECORDING COMPLETE — BUILDING MNE-READY PACKAGE';$('recordState').className='record-state idle';
+  try{
+    const file=buildRawExport(reason);
+    const packageFile=await buildMnePackage(reason);
+    downloadBlob(packageFile.name,packageFile.blob);
+    $('recordPill').textContent='Recording saved';$('recordPill').className='pill good';
+    $('recordState').textContent='RECORDING COMPLETE — MNE-READY ZIP SAVED';
+    $('downloadStatus').innerHTML=`<strong>MNE-ready EEG package saved.</strong><div class="download-status">${packageFile.name}<br/>${file.rows.toLocaleString()} synchronized EEG rows • ${state.events.length} event(s) • ${((state.stoppedAt-state.startedAt)/1000).toFixed(1)} s<br/>Contains raw_eeg.csv, events.tsv, eeg_metadata.json, and README.txt.</div><div class="actions" style="margin-top:10px"><button id="downloadPackageAgain">Download MNE-ready ZIP again</button><button id="downloadRawAgain">Download raw CSV only</button></div>`;
+    $('downloadPackageAgain').addEventListener('click',downloadPackage);
+    $('downloadRawAgain').addEventListener('click',downloadRaw);
+  }catch(err){
+    $('recordPill').textContent='Export error';$('recordPill').className='pill danger';
+    $('recordState').textContent='RECORDING COMPLETE — EXPORT NEEDS ATTENTION';
+    $('downloadStatus').innerHTML=`<strong>Recording stopped, but packaging failed.</strong><div class="download-status">${esc(err?.message||err)}</div>`;
+  }
+  updateUI();
 }
 
 function markEvent(){
@@ -273,13 +293,44 @@ setInterval(updateUI,500);
 function nearestEventLabel(ts){let best=null,bestDt=Infinity;for(const e of state.events){const d=Math.abs(e.timestamp-ts);if(d<bestDt&&d<=1000/FS*3){best=e;bestDt=d}}return best?`${best.source==='auto'?'AUTO':'MANUAL'}: ${best.label}`:''}
 function csvEscape(v){if(v==null)return '';const s=String(v);return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s}
 function safeName(s){return String(s||'ANR').replace(/[^a-z0-9_-]+/gi,'_').replace(/^_+|_+$/g,'').slice(0,60)||'ANR'}
+function exportBaseName(){const stamp=new Date(state.stoppedAt||Date.now()).toISOString().replace(/[:.]/g,'-');return `ANR_${safeName($('sessionCode').value)}_${stamp}`}
 function buildRawExport(reason){
-  const n=Math.min(...state.recorded.map(c=>c.values.length));const rows=['timestamp_ms,iso_time,sample_index,session_code,protocol,stop_reason,TP9_uV,AF7_uV,AF8_uV,TP10_uV,event_marker'];
-  for(let i=0;i<n;i++){const ts=state.recorded[0].times[i];rows.push([ts,new Date(ts).toISOString(),i,$('sessionCode').value,$('protocol').value,reason,state.recorded[0].values[i],state.recorded[1].values[i],state.recorded[2].values[i],state.recorded[3].values[i],nearestEventLabel(ts)].map(csvEscape).join(','))}
-  const stamp=new Date().toISOString().replace(/[:.]/g,'-'),base=`ANR_${safeName($('sessionCode').value)}_${stamp}`,name=`${base}_RAW_EEG.csv`,csv=rows.join('\n');state.lastRawCsv=csv;state.lastRawName=name;return {name,csv,rows:n};
+  const n=Math.min(...state.recorded.map(c=>c.values.length));const rows=['sample_index,time_s,timestamp_ms,iso_time,session_code,protocol,stop_reason,TP9_uV,AF7_uV,AF8_uV,TP10_uV,event_marker'];
+  for(let i=0;i<n;i++){const ts=state.recorded[0].times[i],timeS=i/FS;rows.push([i,timeS.toFixed(9),ts,new Date(ts).toISOString(),$('sessionCode').value,$('protocol').value,reason,state.recorded[0].values[i],state.recorded[1].values[i],state.recorded[2].values[i],state.recorded[3].values[i],nearestEventLabel(ts)].map(csvEscape).join(','))}
+  const base=exportBaseName(),name=`${base}_raw_eeg.csv`,csv=rows.join('\n');state.lastRawCsv=csv;state.lastRawName=name;return {name,csv,rows:n};
 }
-function downloadText(name,text,type){const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1200)}
+async function buildMnePackage(reason){
+  const base=exportBaseName();
+  const files=buildMneReadyFiles({
+    fs:FS,
+    sessionCode:$('sessionCode').value,
+    protocol:$('protocol').value,
+    stopReason:reason,
+    startedAt:state.startedAt,
+    stoppedAt:state.stoppedAt,
+    deviceName:state.deviceName,
+    recorded:state.recorded,
+    events:state.events,
+  });
+  state.lastRawCsv=files.rawCsv;state.lastRawName=`${base}_raw_eeg.csv`;
+  const metadata=JSON.parse(files.metadataJson);
+  metadata.eeg_file=`${base}_raw_eeg.csv`;
+  metadata.events_file=`${base}_events.tsv`;
+  const guide=`ANR Muse EEG Recorder — MNE-ready session package\n\nFiles\n- ${base}_raw_eeg.csv: raw four-channel Muse EEG in microvolts with deterministic sample_index/time_s.\n- ${base}_events.tsv: one row per research event with onset in seconds.\n- ${base}_eeg_metadata.json: sampling rate, channel names/types/units, device and session metadata.\n\nMNE reconstruction\n1. Load raw_eeg.csv.\n2. Use TP9_uV, AF7_uV, AF8_uV, TP10_uV.\n3. Convert microvolts to volts (multiply by 1e-6).\n4. Create mne.io.RawArray with sfreq=${FS}.\n5. Load events.tsv as mne.Annotations.\n\nANR pipeline\nUse the ANR-EEG-Analysis-Pipeline repository / guided Colab notebook for import, QC, preprocessing, PSD, band power and FIF export.\n\nResearch use only. Not a clinical EEG or diagnostic device.\n`;
+  const zip=new JSZip();
+  zip.file(`${base}_raw_eeg.csv`,files.rawCsv);
+  zip.file(`${base}_events.tsv`,files.eventsTsv);
+  zip.file(`${base}_eeg_metadata.json`,JSON.stringify(metadata,null,2));
+  zip.file('README.txt',guide);
+  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
+  const name=`${base}_MNE_READY.zip`;
+  state.lastPackageBlob=blob;state.lastPackageName=name;
+  return {name,blob,rows:files.nSamples,events:files.nEvents};
+}
+function downloadText(name,text,type){const blob=new Blob([text],{type});downloadBlob(name,blob)}
+function downloadBlob(name,blob){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1200)}
 function downloadRaw(){if(state.lastRawCsv)downloadText(state.lastRawName,state.lastRawCsv,'text/csv')}
+function downloadPackage(){if(state.lastPackageBlob)downloadBlob(state.lastPackageName,state.lastPackageBlob)}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 
 $('connectMuse').addEventListener('click',connectMuse);
@@ -290,5 +341,6 @@ $('markEvent').addEventListener('click',markEvent);
 $('toggleAutoMarker').addEventListener('click',toggleAutoMarker);
 $('eventText').addEventListener('input',()=>{if(state.autoMarker.enabled&&!state.recording){state.autoMarker.name=$('eventText').value.trim();updateAutoMarkerUI()}});
 $('markerInterval').addEventListener('input',()=>{if(state.autoMarker.enabled&&!state.recording){const v=Number($('markerInterval').value);if(v>=1)state.autoMarker.intervalSec=v;updateAutoMarkerUI()}});
+$('downloadPackage').addEventListener('click',downloadPackage);
 $('downloadRaw').addEventListener('click',downloadRaw);
 updateAutoMarkerUI();

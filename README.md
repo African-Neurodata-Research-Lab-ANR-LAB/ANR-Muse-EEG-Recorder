@@ -1,64 +1,53 @@
 # ANR Muse EEG Recorder
 
-A lightweight browser-based Muse EEG acquisition tool developed for research use by the **African NeuroData Research Lab (ANR)**.
+**African NeuroData Research Lab (ANR)**
 
-- Website: https://africanneurodataresearch.org/
-- Research enquiries: anrlab.ng@gmail.com
-GitHub: https://github.com/Duruhjunior77/ANR-Muse-EEG-Recorder
+Browser-based Muse EEG acquisition with event markers and **MNE-ready research export**.
 
-## Overview
+Website: https://africanneurodataresearch.org/  
+Research enquiries: anrlab.ng@gmail.com
 
-ANR Muse EEG Recorder connects directly to a Muse headset through Web Bluetooth in Chrome or Microsoft Edge and records four EEG channels:
+## What the recorder does
 
-- TP9
-- AF7
-- AF8
-- TP10
+- Connects directly to Muse through Web Bluetooth.
+- Displays four live EEG channels: TP9, AF7, AF8, TP10.
+- Records raw EEG at 256 Hz.
+- Supports manual and repeated automatic research event markers.
+- Shows acquisition/contact-status indicators.
+- Exports an MNE-ready ZIP immediately after recording stops.
 
-The recorder is intentionally focused on acquisition rather than clinical interpretation.
+## MNE-ready export
 
-## Features
-
-- Direct Muse connection through Web Bluetooth
-- Live four-channel EEG visualization
-- Distinct channel colors
-- Electrode contact-status indicators
-- Recording timer and live saved-sample counter
-- Manual event markers
-- Repeating automatic event markers
-- Configurable recording duration
-- Automatic raw CSV download when recording stops
-- ANR research branding and contact information
-
-## Automatic event markers
-
-A repeated marker can be configured before or during a research session.
-
-Example:
-
-- Marker name: `Eyes closed`
-- Interval: `30 seconds`
-
-When enabled before acquisition begins, the recorder places the marker at approximately:
-
-- 30 s
-- 60 s
-- 90 s
-- 120 s
-- ...
-
-until recording ends.
-
-Markers are labeled as either `AUTO` or `MANUAL` and are included in the exported CSV.
-
-## Raw EEG export
-
-When a recording stops, the browser automatically prepares a CSV containing:
+A completed session downloads as:
 
 ```text
+ANR_<session>_<timestamp>_MNE_READY.zip
+```
+
+Containing:
+
+```text
+├── *_raw_eeg.csv
+├── *_events.tsv
+├── *_eeg_metadata.json
+└── README.txt
+```
+
+The raw CSV includes deterministic `time_s`:
+
+```text
+time_s = sample_index / 256
+```
+
+This removes dependence on browser wall-clock timestamps when reconstructing the EEG in MNE.
+
+### Raw CSV fields
+
+```text
+sample_index
+time_s
 timestamp_ms
 iso_time
-sample_index
 session_code
 protocol
 stop_reason
@@ -69,125 +58,82 @@ TP10_uV
 event_marker
 ```
 
-The four EEG channels are synchronized into rows for straightforward downstream processing in Python, MATLAB, R, EEGLAB, MNE-Python, or similar research tools.
+The EEG values remain raw microvolt values in the browser export. The ANR analysis pipeline converts them to volts when creating an MNE Raw object.
 
-## Requirements
+## Events
 
-- Muse EEG headset
-- Chrome or Microsoft Edge with Web Bluetooth support
-- Node.js LTS
-- Bluetooth-enabled computer
+The separate `events.tsv` file contains one event per row:
+
+```text
+onset    duration    description    source
+```
+
+This prevents repeated adjacent CSV marker rows from being interpreted as multiple experimental events.
+
+## Analyze with MNE-Python
+
+Use the companion repository:
+
+**ANR EEG Analysis Pipeline**  
+https://github.com/African-Neurodata-Research-Lab-ANR-LAB/ANR-EEG-Analysis-Pipeline
+
+Its guided Google Colab notebook imports the ANR export, creates an MNE Raw object, runs technical QC and preprocessing, calculates PSD/band power, and exports a true `.fif` file and HTML report.
+
+## Recording procedure
+
+New users should read:
+
+**[Research Recording Procedure](docs/RECORDING_PROCEDURE.md)**
+
+For the exact MNE-ready file specification:
+
+**[MNE Export Format](docs/MNE_EXPORT_FORMAT.md)**
 
 ## Run locally
 
-Clone the repository:
+Requirements:
 
-```bash
-git clone https://github.com/Duruhjunior77/ANR-Muse-EEG-Recorder.git
-cd ANR-Muse-EEG-Recorder
-```
-
-Install dependencies:
+- Muse EEG headset
+- Chrome or Microsoft Edge
+- Bluetooth-enabled computer
+- Node.js LTS
 
 ```bash
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
 ```
 
-Then open:
+Open:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-On Windows, you can also double-click:
+## Development checks
 
-```text
-START_ANR_EEG.bat
+```bash
+npm test
+npm run build
 ```
 
-## Recording workflow
+## Project team
 
-1. Start the local ANR EEG Recorder.
-2. Turn on the Muse headset.
-3. Click **Connect Muse**.
-4. Select the headset from the browser Bluetooth dialog.
-5. Enter the session code and protocol.
-6. Configure event markers if needed.
-7. Press **Start recording**.
-8. Confirm the saved-sample counter is increasing.
-9. Press **Stop recording**, or allow a timed recording to finish automatically.
-10. The raw EEG CSV downloads automatically.
+See **[CONTRIBUTORS.md](CONTRIBUTORS.md)**.
 
-## Research-use statement
+### Collaborators
 
-This software is intended for **research EEG acquisition and data export only**.
+Duruh Joseph; Samuel Akingbulu; Deborah Eseurhobo; Christopher Ogbe; Angelic Charles; Esther Bassey; Smart Oparaugo; Barisua Nsaane; Goodness Naabie; Patrick Filima.
 
-It is not a medical device and is not intended to diagnose seizures, epilepsy, hydrocephalus, neurological disease, or any other clinical condition.
+### Principal Investigator
 
-Researchers are responsible for obtaining appropriate ethical approval, participant consent, institutional authorization, and data-governance approval for their intended use.
+**Dr. Eberechi Wogu**
 
 ## Data privacy
 
-Participant EEG recordings are processed locally in the browser and are not automatically uploaded to ANR Lab or any external server by this application.
+Recordings are processed locally in the browser. This application does not automatically upload EEG data to ANR Lab or an external server.
 
-Avoid using personally identifying information in session codes when collecting human-participant research data.
+Do not use participant names or other identifying information as session codes.
 
-## Technology
+## Research-use statement
 
-- JavaScript
-- Vite
-- muse-js
-- RxJS
-- Web Bluetooth API
-
-## Project status
-
-Active research prototype.
-
-Contributions, reproducibility feedback, and research collaboration enquiries are welcome through ANR Lab.
-
----
-
-**African NeuroData Research Lab (ANR)**  
-https://africanneurodataresearch.org/  
-anrlab.ng@gmail.com
-
-
-## Live website
-
-Once GitHub Pages is enabled for the repository, the public website is expected at:
-
-https://duruhjunior77.github.io/ANR-Muse-EEG-Recorder/
-
-The site should be opened in a Chromium-based browser such as Chrome or Microsoft Edge for Muse Web Bluetooth support.
-
-### GitHub Pages deployment
-
-This repository includes:
-
-- `vite.config.js`
-- `.github/workflows/deploy-pages.yml`
-
-Every push to the `main` branch automatically builds the Vite application and deploys the `dist/` folder to GitHub Pages.
-
-### Enable Pages once
-
-On GitHub:
-
-1. Open the repository.
-2. Go to **Settings**.
-3. Open **Pages**.
-4. Under **Build and deployment**, choose **GitHub Actions**.
-5. Push to `main` or run the workflow manually from the **Actions** tab.
-
-After deployment completes, the website will be available over HTTPS.
-
-### Data handling
-
-EEG data remains in the user's browser during normal use. Recordings are downloaded locally as CSV files; this deployment does not include a backend database or automatic upload service.
+The ANR Muse EEG Recorder is intended for research acquisition and data export. It is not a clinical EEG system and is not intended for diagnosis or medical interpretation.
